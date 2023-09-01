@@ -1,6 +1,11 @@
-# Deploying Socket.IO to Azure Web App
+# [Updated] Deploying Socket.IO to Azure Web App
 
-Building applications in today’s world requires real-time web functionality to applications. This used to be considered an extra, a nice to have, but in todays development world it is now considered required. So what is a real-time web functionality? The most common example is a real-time chat application. But it is so much more and much deeper in todays web environment. On a given day, you most likely interact with dozens of websites and I would wager the vast majority of them have some element of real-time communications. For example, Facebook and Twitter has real-time notifications in the browser. Your news websites might give you alerts on breaking news.
+## Update
+This blog was first published on August 21, 2021. This is an update to the original blog to take advantage of [Azure's native support for Socket.IO](https://learn.microsoft.com/azure/azure-web-pubsub/socketio-overview), which was released on August 21, 2023. (Exactly two years later, talking about coincidences!)
+
+## Real-time features permeate the apps we use every day
+Building applications in today’s world requires real-time web functionality to applications. This used to be considered an extra, a nice to have, but in today's development world it is now considered required. So what is a real-time web functionality? The most common example is a real-time chat application. But it is so much more and much deeper in todays web environment. On a given day, you most likely interact with dozens of websites and I would wager the vast majority of them have some element of real-time communications. For example, Facebook and Twitter has real-time notifications in the browser. Your news websites might give you alerts on breaking news.
+![](images/notifications.png)
 
 In the old days, the website might have been configured with a timer and simply refreshed every 60 seconds. This worked but created a lot of unnecessary noise between the client and the server. Enter real-time, bidirectional and event-based communication between the browser and the server.
 
@@ -11,6 +16,14 @@ There are several products that do this. The largest is Socket.IO. It’s been a
 You might ask, why Socket.IO if SignalR is available? For me it was ease of deployment and online documentation. There is something to be said about a product that is used by millions of websites. A simple search of Socket.IO on Stack Overflow and you can see hundreds of code samples.
 
 In this guide we are going to deploy Socket.IO into Azure as a NodeJS application. And in addition, we will take the sample chat application from Socket.IO website and show a few things that are possible.
+
+## Our game plan for this tutorial
+This is the game plan for this tutorial, feel free to navigate to the part that's most interesting to you.
+- [Get everything ready](./blog.md#get-everything-ready)
+- [Building the Socket.IO Server](./blog.md#building-the-socketio-server)
+- [Our Chat Application Website](./blog.md#our-chat-application-website)
+- [Deploy to Azure](./blog.md#deploy-to-azure)
+
 
 ## Get Everything Ready
 For this project I will be using VS Code, Node.js and NPM. If you haven’t already, you should install these items to your workstation before we get going. You need at least Node.js 10 or later.
@@ -27,20 +40,22 @@ It will ask you a bunch of basic questions about your application. Feel free to 
 
 Next, we need to install Socket.IO, run:
 ```javascript
-npm install socket.io
+npm install @azure/web-pubsub-socket.io 
 ```
 
 Next, we are going to install Express as the server Socket.IO will run under, run:
 ```javascript
-npm install socket.io
+npm install express
 ```
 
-We now have all of the needed parts to build our Express Server running Socket.IO. In our VS Code environment, we should add one other file since we will publish this to GitHub.
+We now have all of the needed parts to build our `Express Server` running `Socket.IO`. Notice that we are using `@azure/web-pubsub-socket.io` in this project, instead of `socket.io`. Azure now natively supports Socket.IO. This mean as developers, we can continue using the APIs Socket.IO library provides but let Azure handle managing client connections for us. You can learn more of the [benefits of using an Azure-hosted approach here](https://learn.microsoft.com/azure/azure-web-pubsub/socketio-overview#benefits-over-hosting-a-socketio-app-yourself). 
 
-Create a file named .gitnore and add two items:
+In our VS Code environment, we should add one other file since we will publish this to GitHub.
+
+Create a file named `.gitignore` and add two items:
 
 ```txt
-node_modles
+node_modules
 .vscode
 ```
 
@@ -51,12 +66,13 @@ Now we need to setup our web server and integrate Socket.IO into Express. To do 
 const express = require('express');
 const app = express();
 const server = require('http').createServer((req, res) => res.end());
-const io = require('socket.io')(server, {
-    perMessageDeflate :false,
-    cors: {
-        origin: '*',
-        methods: ['GET', 'POST'],
-    },
+
+const { useAzureSocketIO } = require("@azure/web-pubsub-socket.io");
+let io = new Server(3000);
+
+useAzureSocketIO(io, {
+    hub: "chatapp", // The hub can be anything. Since we are building a chatapp, let's name it "chatapp".
+    connectionString: process.argv[2]
 });
 
 io.on('connection', (socket) => {
@@ -78,11 +94,9 @@ server.listen(process.env.PORT || 3000, () => {
 
 There are a lot of things happening here so let’s talk about the important items.
 
-At the top we are declaring our variables (const). The first two are loading modules and creating our express app. The third is building our http server. The fourth is where we integrate Socket.IO into the Express server. There are two items we define:
+At the top we are declaring our variables (const). The first two are loading modules and creating our express app. The third is building our http server. The fourth is where we integrate Azure's support for Socket.IO into the Express server. 
 
-perMessageDeflate is needed for Socket.IO to run in Azure. This is a requirement from Microsoft. Without it, it won’t work.
-cors is to allow clients from any URL to connect. You could define the specific web url you want to allow to connect if you would rather.
-NOTE: In almost ALL examples of Express and Socket.IO they assume your website is going to run in the same Express environment. That isn’t the real world in my mind. In most cases, you have a Socket.IO server and multiple clients connect to it from different locations.
+In order to connect with Socket.IO service on Azure, we need to configure it properly. [Refer to this step-by-step guide](https://learn.microsoft.com/azure/azure-web-pubsub/socketio-quickstart) to learn about how to create a Socket.IO resource on Azure and how to get `connectionString`.
 
 The next section starting with io.on is where we wire up Socket.IO to do something. The first section tells us that when someone connects to the server, we are going to write a message to the console log. Next we have a disconnect event (i.e. when they close the tab) and in this case we are going to again display a message that the user disconnected. Lastly, we have a ‘chat message’ event. Here, we do two things.
 
@@ -91,12 +105,12 @@ io.emit will send this message to everyone who is subscribed to this Socket.IO s
 The last three lines are the Express server starting up. Here we tell it we are going to run on port 3000 (locally) or on the process.env.PORT. When we deploy this to Azure, that will be 443.
 
 We could run this locally now:
-
+Make sure to replace with your `connectionString` found on Azure.
 ```bash
-node index.js
+node index.js "<connection-string>"
 ```
 
-We can now see it running:
+We can now see it running
 
 ## Our Chat Application Website
 I mentioned this is an adaptation of the Socket.IO learn project. You can head over to that site to see the original steps if you want.
@@ -143,7 +157,8 @@ Inside of our ChatApp folder, create an index.html and add the following:
 
         <script src="https://cdn.socket.io/4.1.2/socket.io.min.js" integrity="sha384-toS6mmwu70G0fw54EGlWWeA4z3dyJ+dlXBtSURSKN4vyRFOcxd3Bzjj/AoOwY+Rg" crossorigin="anonymous"></script>
         <script>
-            var socket = io.connect('http://localhost:3000');
+            const socket = io("<socketio-service-endpoint>", {
+              path: "/clients/socketio/hubs/Hub",});
 
             $(document.body).on('click', '#btnSend', () => {
                 console.log('click button');
@@ -161,7 +176,9 @@ Inside of our ChatApp folder, create an index.html and add the following:
 ```
 Lets talk about what we have above. The top is loading jQuery and some CSS. In the body of the HTML we have three items. First is a UL that we will append LI items to when messages are sent or received. You have the input text and a button to send your message.
 
-In the script tag, we load Socket.IO from a CDN location. Below that, we create an instance of the socket and connect to our local server.
+In the script tag, we load Socket.IO from a CDN location. Below that, we create an instance of the socket. Note that this socket.io client connects with the Socket.IO service running on Azure. Make sure to replace "socketio-service-endpoint" with your own found on Azure portal.
+
+![](images/client-url.png)
 
 Below that we have our actions. First, is a click action for when the user clicks the btnSend button, we log the action to the browser console and emit it to the Socket.IO Server.
 
